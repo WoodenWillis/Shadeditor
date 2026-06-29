@@ -66,6 +66,34 @@ public class CubeMapView extends ScalingImageView {
 			return rotation;
 		}
 
+		// The cropped face bitmaps are intentionally non-premultiplied so the
+		// final cube map (rebuilt downstream from the source URIs) keeps
+		// straight alpha. This field, however, is only ever drawn to a Canvas
+		// for the on-screen preview, and Canvas rejects non-premultiplied
+		// bitmaps (BaseCanvas: "trying to use a non-premultiplied bitmap").
+		// Store a premultiplied copy purely for that preview.
+		private void setPreviewBitmap(Bitmap cropped) {
+			if (bitmap != null && bitmap != cropped && !bitmap.isRecycled()) {
+				bitmap.recycle();
+			}
+
+			if (cropped == null) {
+				bitmap = null;
+				return;
+			}
+
+			if (cropped.isPremultiplied() || !cropped.hasAlpha()) {
+				bitmap = cropped;
+				return;
+			}
+
+			Bitmap premultiplied = cropped.copy(Bitmap.Config.ARGB_8888, false);
+			cropped.recycle();
+			// If the copy failed (e.g. OOM), skip the preview rather than
+			// crash; the preview is non-essential.
+			bitmap = premultiplied;
+		}
+
 		@Override
 		public int describeContents() {
 			return 0;
@@ -312,10 +340,10 @@ public class CubeMapView extends ScalingImageView {
 		}
 
 		Face face = faces[idx];
-		face.bitmap = BitmapEditor.crop(
+		face.setPreviewBitmap(BitmapEditor.crop(
 				bitmap,
 				from.clip,
-				from.rotation);
+				from.rotation));
 		face.uri = from.uri;
 		face.clip = from.clip;
 		face.rotation = from.rotation;
@@ -441,10 +469,10 @@ public class CubeMapView extends ScalingImageView {
 
 		if (selectedBitmap != null) {
 			Face face = faces[selectedFace];
-			face.bitmap = BitmapEditor.crop(
+			face.setPreviewBitmap(BitmapEditor.crop(
 					selectedBitmap,
 					face.clip,
-					face.rotation);
+					face.rotation));
 		}
 
 		selectedFace = n;
