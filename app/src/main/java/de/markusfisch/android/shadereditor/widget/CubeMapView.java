@@ -66,12 +66,18 @@ public class CubeMapView extends ScalingImageView {
 			return rotation;
 		}
 
-		// The cropped face bitmaps are intentionally non-premultiplied so the
-		// final cube map (rebuilt downstream from the source URIs) keeps
-		// straight alpha. This field, however, is only ever drawn to a Canvas
-		// for the on-screen preview, and Canvas rejects non-premultiplied
-		// bitmaps (BaseCanvas: "trying to use a non-premultiplied bitmap").
-		// Store a premultiplied copy purely for that preview.
+		// The cropped face bitmaps come out of BitmapEditor as ARGB_8888 with
+		// hasAlpha() == true and setPremultiplied(false) (straight alpha), which
+		// keeps the final cube map correct since it is rebuilt downstream from
+		// the source URIs. This field, however, is only ever drawn to a Canvas
+		// for the on-screen preview, and Canvas (BaseCanvas.throwIfCannotDraw)
+		// rejects an ARGB_8888 bitmap that has alpha and is not premultiplied:
+		// "trying to use a non-premultiplied bitmap". Bitmap.copy() preserves
+		// the source alpha type, so it cannot fix this. Instead, rebuild a
+		// genuinely premultiplied bitmap for the preview: getPixels() always
+		// returns straight-alpha color ints, and a fresh ARGB_8888 bitmap is
+		// premultiplied by default, so writing the pixels back premultiplies
+		// them. The straight-alpha original is recycled.
 		private void setPreviewBitmap(Bitmap cropped) {
 			if (bitmap != null && bitmap != cropped && !bitmap.isRecycled()) {
 				bitmap.recycle();
@@ -87,10 +93,23 @@ public class CubeMapView extends ScalingImageView {
 				return;
 			}
 
-			Bitmap premultiplied = cropped.copy(Bitmap.Config.ARGB_8888, false);
+			int width = cropped.getWidth();
+			int height = cropped.getHeight();
+			Bitmap premultiplied = null;
+			try {
+				int[] pixels = new int[width * height];
+				cropped.getPixels(pixels, 0, width, 0, 0, width, height);
+				premultiplied = Bitmap.createBitmap(
+						width,
+						height,
+						Bitmap.Config.ARGB_8888);
+				premultiplied.setPixels(pixels, 0, width, 0, 0, width, height);
+			} catch (OutOfMemoryError e) {
+				// The preview is non-essential; skip it rather than crash.
+				premultiplied = null;
+			}
+
 			cropped.recycle();
-			// If the copy failed (e.g. OOM), skip the preview rather than
-			// crash; the preview is non-essential.
 			bitmap = premultiplied;
 		}
 
